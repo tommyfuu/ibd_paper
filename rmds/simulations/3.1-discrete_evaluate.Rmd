@@ -21,15 +21,19 @@ dir_output <- "results/simulations/discrete/"
 
 ```{r load data}
 # parallel computing
-ncores <- 20
+ncores <- 10
 load(paste0(dir_output, "tb_sim.RData"))
 ```
 
 ```{r evaluate metrics before correction}
+library(tibble)
+library(smar)
+library(MMUPHin)
 N <- nrow(tb_sim)
 start.time <- Sys.time()
 doParallel::registerDoParallel(ncores)
 results <- foreach::`%dopar%`(
+  # foreach::foreach(i = 1:N),
   foreach::foreach(i = 1:N),
   {
     cat(i, "\n", file = paste0(dir_output, "evaluate_before_progress.txt"), 
@@ -47,13 +51,13 @@ results <- foreach::`%dopar%`(
     phylo <- phyloseq::phyloseq(
       phyloseq::otu_table(mat_otu, taxa_are_rows = TRUE),
       phyloseq::sample_data(df_metadata)) %>%
-      phyloseq::transform_sample_counts(MMUPHin:::tss) %>%
+      phyloseq::transform_sample_counts(MMUPHin:::TSS) %>%
        smar::prune_taxaSamples()
     D <- phyloseq::distance(phylo, method = "bray")
-    R2_cluster <- vegan::adonis(D ~ cluster,
+    R2_cluster <- vegan::adonis2(D ~ cluster,
                                 data = smar::sample_data2(phylo),
                                 permutations = 2)$aov.tab["cluster", "R2"]
-    R2_batch <- vegan::adonis(D ~ batch,
+    R2_batch <- vegan::adonis2(D ~ batch,
                               data = smar::sample_data2(phylo),
                               permutations = 2)$aov.tab["batch", "R2"]
     pred.str <-
@@ -78,13 +82,61 @@ save(results, file = paste0(dir_output, "evaluate_before.RData"))
 print(Sys.time() - start.time)
 ```
 
+```{r}
+results <- foreach::`%dopar%`(
+  # foreach::foreach(i = 1:N),
+  foreach::foreach(i = 1:3),
+  {
+    cat(i, "\n", file = paste0(dir_output, "evaluate_before_progress_2.txt"), 
+        append = TRUE)
+    mat_otu <- read.table(paste0(dir_output,
+                                 "sparseDOSSA_sets/",
+                                 i, ".tsv"),
+                          header = TRUE,
+                          sep = "\t",
+                          row.names = 1) %>% 
+      as.matrix
+    i_simSetup <- tb_sim[i, ]
+    df_metadata <- i_simSetup$df_metadata[[1]]
+    
+    phylo <- phyloseq::phyloseq(
+      phyloseq::otu_table(mat_otu, taxa_are_rows = TRUE),
+      phyloseq::sample_data(df_metadata)) %>%
+      phyloseq::transform_sample_counts(MMUPHin:::TSS) %>%
+       smar::prune_taxaSamples()
+    D <- phyloseq::distance(phylo, method = "bray")
+    R2_cluster <- vegan::adonis2(D ~ cluster,
+                                data = smar::sample_data2(phylo),
+                                permutations = 2)$aov.tab["cluster", "R2"]
+    R2_batch <- vegan::adonis2(D ~ batch,
+                              data = smar::sample_data2(phylo),
+                              permutations = 2)$aov.tab["batch", "R2"]
+    pred.str <-
+      fpc::prediction.strength(
+        xdata = D,
+        Gmin = 2,
+        Gmax = 10,
+        clustermethod = fpc::claraCBI,
+        classification = "centroid",
+        M = 30,
+        distances = TRUE,
+        count = FALSE)$mean.pred[-1] %>%
+      data.frame(k = 2:10, mean_pred = .)
+    
+    return(list(R2 = c("cluster" = R2_cluster,
+                       "batch" = R2_batch), 
+                pred.str = pred.str))
+  }
+) 
+```
+
 
 ```{r batch correction and evaluate metrics after correction}
 rm(results)
 start.time <- Sys.time()
 doParallel::registerDoParallel(ncores)
 results_correct <- foreach::`%dopar%`(
-  foreach::foreach(i = 1:N),
+  foreach::foreach(i = 1:2),
   {
     cat(i, "\n", file = paste0(dir_output, "evaluate_after_progress.txt"), append = TRUE)
     mat_otu <- read.table(paste0(dir_output,
@@ -98,7 +150,7 @@ results_correct <- foreach::`%dopar%`(
     df_metadata <- tb_sim[i, ]$df_metadata[[1]]
     
     mat_otu <- mat_otu %>% 
-      MMUPHin::adjust.batch(batch = "batch", 
+      MMUPHin::adjust_batch(batch = "batch", 
                             data = df_metadata,
                             diagnostics = FALSE, 
                             verbose = FALSE)
@@ -106,13 +158,13 @@ results_correct <- foreach::`%dopar%`(
     phylo <- phyloseq::phyloseq(
       phyloseq::otu_table(mat_otu, taxa_are_rows = TRUE),
       phyloseq::sample_data(df_metadata)) %>%
-      phyloseq::transform_sample_counts(MMUPHin:::tss) %>%
+      phyloseq::transform_sample_counts(MMUPHin:::TSS) %>%
        smar::prune_taxaSamples()
     D <- phyloseq::distance(phylo, method = "bray")
-    R2_cluster <- vegan::adonis(D ~ cluster,
+    R2_cluster <- vegan::adonis2(D ~ cluster,
                                 data = smar::sample_data2(phylo),
                                 permutations = 2)$aov.tab["cluster", "R2"]
-    R2_batch <- vegan::adonis(D ~ batch,
+    R2_batch <- vegan::adonis2(D ~ batch,
                               data = smar::sample_data2(phylo),
                               permutations = 2)$aov.tab["batch", "R2"]
     
